@@ -1,10 +1,11 @@
 from collections import defaultdict
 import json
+import os
 
 allRatings = []
 userRatings = defaultdict(list)
 
-with open('train.json', 'r') as train_file:
+with open(os.path.join('data', 'train.json'), 'r') as train_file:
     for row in train_file:
         data = json.loads(row)
         r = float(data['overall'])
@@ -16,8 +17,8 @@ userAverage = {}
 for u in userRatings:
     userAverage[u] = sum(userRatings[u]) / len(userRatings[u])
 
-predictions = open('rating_predictions.csv', 'w')
-for l in open('rating_pairs.csv'):
+predictions = open(os.path.join('data', 'rating_predictions.csv'), 'w')
+for l in open(os.path.join('data', 'rating_pairs.csv')):
     if l.startswith('userID'):
         #header
         predictions.write(l)
