@@ -152,7 +152,7 @@ with open(os.path.join('data', 'test.json'), 'r') as test_file:
 data_df = pd.DataFrame(data)
 del data
 
-test_df_cf = data_df[['reviewerID', 'itemID', 'overall']]
+test_df_cf = data_df[['reviewerID', 'itemID']]
 
 data_df['reviewMonth'] = data_df['reviewTime'].apply(lambda x: x.split(' ')[0])
 data_df['reviewYear'] = data_df['reviewTime'].apply(lambda x: x.split(' ')[2])
@@ -202,7 +202,7 @@ preds = pd.DataFrame(predictions, columns=['prediction'])
 X_test['userID-itemID'] = X_test['reviewerID'] + "-" + X_test['itemID']
 
 final_preds_reg = pd.concat([X_test[['userID-itemID']], preds], axis=1)
-final_preds_reg.index = final_preds['userID-itemID']
+final_preds_reg.index = final_preds_reg['userID-itemID']
 
 ################################
 # Collaborative Filtering
@@ -274,11 +274,12 @@ def weighted_average_data(X, total_avg, user_avgs, item_avgs):
     df_user = pd.merge(X, user_avgs, how='left', on=['reviewerID'])
     df_final = pd.merge(df_user, item_avgs, how='left', on=['itemID'])
     df_final = df_final[['userRating', 'itemRating']]
-    df_final.fillna(total_avg)
+    df_final.index = X.index
+    df_final = df_final.fillna(total_avg)
     return df_final
 
 X_test_aug = weighted_average_data(test_df_cf, global_average, user_avgs, item_avgs)
-X_test_mod = pd.merge(test_df_cf, X_test_aug, how='left', left_index=True, right_index=True)
+X_test_mod = pd.concat([test_df_cf, X_test_aug], axis=1)
 
 def threshold_rating(rating):
     """Thresholds `rating` to lie in the range [1, 5].
