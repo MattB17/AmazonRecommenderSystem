@@ -12,7 +12,7 @@ from nltk.stem.porter import PorterStemmer
 import scipy.sparse as sp
 from sklearn.linear_model import Lasso
 from xgboost import XGBRegressor
-from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 
 ###############################
@@ -130,7 +130,7 @@ exclude_english = set(stopwords.words('english'))
 ps = PorterStemmer()
 X_train['processedReview'] = X_train['fullReviewText'].apply(lambda x: process_review_text(x, exclude_english, ps))
 
-tfidf = CountVectorizer(max_features=1500)
+tfidf = TfidfVectorizer()
 X_train_tfidf = tfidf.fit_transform(X_train['processedReview'])
 
 X_train_reg_sp = sp.csr_matrix(X_train_reg)
@@ -138,10 +138,10 @@ X_train_tfidf_reg = sp.hstack((X_train_tfidf, X_train_reg_sp), format='csr')
 
 print("Got Matrix")
 
-reg_model = XGBRegressor(learning_rate=0.05, n_estimators=1000, max_depth=2)
+reg_model = XGBRegressor(learning_rate=0.3, n_estimators=1000, max_depth=2)
 reg_model.fit(X_train_tfidf_reg, y_train)
 
-average_rating = y_train.mean()
+global_average = data_df_cf['overall'].mean()
 
 ###############################
 # PREDICTION
@@ -201,7 +201,9 @@ predictions = reg_model.predict(X_test_tfidf_reg)
 preds = pd.DataFrame(predictions, columns=['prediction'])
 X_test['userID-itemID'] = X_test['reviewerID'] + "-" + X_test['itemID']
 
-final_preds_reg = pd.concat([X_test[['userID-itemID']], preds], axis=1)
+preds = preds.reset_index()[['prediction']]
+ids = X_test[['userID-itemID']].reset_index()[['userID-itemID']]
+final_preds_reg = pd.concat([ids, preds], axis=1)
 final_preds_reg.index = final_preds_reg['userID-itemID']
 
 ################################
@@ -230,8 +232,8 @@ model_knn = NearestNeighbors(metric='cosine', algorithm='brute', n_neighbors=5)
 model_knn.fit(user_item_train_matrix)
 user_neighbors = np.asarray(model_knn.kneighbors(user_item_train_matrix, return_distance=False))
 
-train_user_avg = data_df_cf.groupby(train_data['reviewerID'], as_index=False)['overall'].mean()
-train_item_avg = data_df_cf.groupby(train_data['itemID'], as_index=False)['overall'].mean()
+train_user_avg = data_df_cf.groupby(data_df_cf['reviewerID'], as_index=False)['overall'].mean(),reset_index()
+train_item_avg = data_df_cf.groupby(data_df_cf['itemID'], as_index=False)['overall'].mean().reset_index()
 train_user_avg.columns = ['reviewerID', 'userAverage']
 train_item_avg.columns = ['itemID', 'itemAverage']
 train_user_avg = train_user_avg.set_index('reviewerID')
@@ -317,8 +319,8 @@ for l in open(os.path.join('data', 'rating_pairs.csv')):
         predictions.write(l)
         continue
     id = l.strip()
-    if id in final_preds.index:
-        predictions.write(id+ ',' + str(final_preds['prediction'][id]) + '\n')
+    if id in final_preds_reg.index:
+        predictions.write(id+ ',' + str(final_preds_reg['prediction'][id]) + '\n')
     elif id in X_test_mod.index:
         predictions.write(id + ',' + str(X_test_mod['pred'][id]) + '\n')
     else:
