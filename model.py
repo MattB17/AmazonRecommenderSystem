@@ -26,6 +26,8 @@ del data
 
 data_df_cf = data_df[['reviewerID', 'itemID', 'overall']]
 
+global_average = data_df['overall'].mean()
+
 
 ###############################
 # PREPROCESSING
@@ -138,10 +140,8 @@ X_train_tfidf_reg = sp.hstack((X_train_tfidf, X_train_reg_sp), format='csr')
 
 print("Got Matrix")
 
-reg_model = XGBRegressor(learning_rate=0.3, n_estimators=1000, max_depth=2)
+reg_model = XGBRegressor(learning_rate=0.3, n_estimators=5000, max_depth=1)
 reg_model.fit(X_train_tfidf_reg, y_train)
-
-global_average = data_df_cf['overall'].mean()
 
 ###############################
 # PREDICTION
@@ -206,108 +206,14 @@ ids = X_test[['userID-itemID']].reset_index()[['userID-itemID']]
 final_preds_reg = pd.concat([ids, preds], axis=1)
 final_preds_reg.index = final_preds_reg['userID-itemID']
 
-################################
-# Collaborative Filtering
-################################
-def user_item_matrix(df, rating_col, user_col, item_col):
-    return sp.csr_matrix(df[rating_col], (df[user_col], df[item_col]))
-
-item_matrix = data_df_cf.pivot(index='itemID', columns='reviewerID', values='overall')
-item_matrix = item_matrix.fillna(0)
-user_item_train_matrix = sp.csr_matrix(item_matrix.values)
-
-global_average = data_df_cf['overall'].mean()
-
-from sklearn.neighbors import NearestNeighbors
-
-model_knn = NearestNeighbors(metric='cosine', algorithm='brute', n_neighbors=5)
-model_knn.fit(user_item_train_matrix)
-item_neighbors = np.asarray(model_knn.kneighbors(user_item_train_matrix, return_distance=False))
-
-user_matrix = data_df_cf.pivot(index='reviewerID', columns='itemID', values='overall')
-user_matrix = user_matrix.fillna(0)
-user_item_train_matrix = sp.csr_matrix(user_matrix.values)
-
-model_knn = NearestNeighbors(metric='cosine', algorithm='brute', n_neighbors=5)
-model_knn.fit(user_item_train_matrix)
-user_neighbors = np.asarray(model_knn.kneighbors(user_item_train_matrix, return_distance=False))
-
-train_user_avg = data_df_cf.groupby(data_df_cf['reviewerID'], as_index=False)['overall'].mean(),reset_index()
-train_item_avg = data_df_cf.groupby(data_df_cf['itemID'], as_index=False)['overall'].mean().reset_index()
-train_user_avg.columns = ['reviewerID', 'userAverage']
-train_item_avg.columns = ['itemID', 'itemAverage']
-train_user_avg = train_user_avg.set_index('reviewerID')
-train_item_avg = train_item_avg.set_index('itemID')
-
-item_avgs = []
-for i in range(len(item_neighbors)):
-    item_avgs.append(train_item_avg['itemAverage'][item_matrix.index[item_neighbors[i]]].mean())
-
-item_avgs = pd.concat([pd.DataFrame(item_matrix.index, columns=['itemID']), pd.DataFrame(item_avgs, columns=['itemRating'])], axis=1)
-
-user_avgs = []
-for i in range(len(user_neighbors)):
-    user_avgs.append(train_user_avg['userAverage'][user_matrix.index[user_neighbors[i]]].mean())
-
-user_avgs = pd.concat([pd.DataFrame(user_matrix.index, columns=['reviewerID']), pd.DataFrame(user_avgs, columns=['userRating'])], axis=1)
-
-def weighted_average_data(X, total_avg, user_avgs, item_avgs):
-    """Calculates the error based on the weighted average prediction.
-
-    Parameters
-    ----------
-    X: pd.DataFrame
-        The DataFrame of features.
-    y: np.array
-        A numpy array containing the targets
-    total_avg: float
-        The average across all users/items.
-    user_avgs: pd.DataFrame
-        A DataFrame containing the average rating for each user.
-    item_avgs: pd.DataFrame
-        A DataFrame containing the average rating for each item.
-
-    Returns
-    -------
-    float
-        A float representing the mean squared error of the predictions.
-
-    """
-    df_user = pd.merge(X, user_avgs, how='left', on=['reviewerID'])
-    df_final = pd.merge(df_user, item_avgs, how='left', on=['itemID'])
-    df_final = df_final[['userRating', 'itemRating']]
-    df_final.index = X.index
-    df_final = df_final.fillna(total_avg)
-    return df_final
-
-X_test_aug = weighted_average_data(test_df_cf, global_average, user_avgs, item_avgs)
-X_test_mod = pd.concat([test_df_cf, X_test_aug], axis=1)
-
 def threshold_rating(rating):
-    """Thresholds `rating` to lie in the range [1, 5].
-
-    Parameters
-    ----------
-    rating: float
-        The rating to be thresholded.
-
-    Returns
-    -------
-    float
-        A float representing the thresholded rating.
-
-    """
     if rating < 1:
         return 1
     if rating > 5:
         return 5
     return rating
 
-X_test_mod['pred'] = (0.5 * X_test_mod['userRating']) + (0.5 * X_test_mod['itemRating'])
-X_test_mod['pred'].apply(lambda x: threshold_rating(x))
-
-X_test_mod['userID-itemID'] = X_test_mod['reviewerID'] + "-" + X_test_mod['itemID']
-X_test_mod.index = X_test_mod['userID-itemID']
+final_preds_reg['prediction'] = final_preds_reg['prediction'].apply(lambda x: threshold_rating(x))
 
 ###############################
 # Outputting
@@ -321,7 +227,5 @@ for l in open(os.path.join('data', 'rating_pairs.csv')):
     id = l.strip()
     if id in final_preds_reg.index:
         predictions.write(id+ ',' + str(final_preds_reg['prediction'][id]) + '\n')
-    elif id in X_test_mod.index:
-        predictions.write(id + ',' + str(X_test_mod['pred'][id]) + '\n')
     else:
         predictions.write(id + ',' + str(global_average) + '\n')
